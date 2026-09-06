@@ -110,7 +110,7 @@ async def main():
             import os
             proxy_password = (
                 os.getenv('APIFY_PROXY_PASSWORD') or
-                Actor.get_env().get('proxy_password')
+                Actor.get_env().get('proxy_password')  # No await
             )
             if proxy_password:
                 proxy_url = f"http://auto:{proxy_password}@proxy.apify.com:8000"
@@ -161,7 +161,7 @@ async def main():
                 await browser.close()
         
         # Save task info
-        env = Actor.get_env()
+        env = Actor.get_env()  # No await in SDK 4.x+
         await Actor.set_value('SAVED-TASK', {
             'actorId': env.get('actor_id'),
             'actorRunId': env.get('actor_run_id'),

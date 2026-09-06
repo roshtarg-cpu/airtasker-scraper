@@ -1,2 +1,4 @@
-apify==1.7.2
+apify>=2.0.0,<3.0.0
 playwright>=1.40.0
+# Explicitly control pydantic to avoid crawlee compatibility issues
+pydantic>=2.0.0,<2.9.0
