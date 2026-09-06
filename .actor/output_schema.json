@@ -1,0 +1,13 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "Airtasker Tasks",
+  "description": "Tasks scraped from Airtasker.com",
+  "type": "object",
+  "properties": {
+    "results": {
+      "type": "string",
+      "title": "Scraped Tasks",
+      "template": "{{links.apiDefaultDatasetUrl}}/items?view=overview"
+    }
+  }
+}

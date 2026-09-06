@@ -1,0 +1,30 @@
+{
+  "title": "Airtasker Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "category": {
+      "title": "Category",
+      "type": "string",
+      "description": "Task category to scrape (e.g., 'cleaning', 'handyman', 'all')",
+      "default": "all",
+      "editor": "textfield"
+    },
+    "maxResults": {
+      "title": "Max Results",
+      "type": "integer",
+      "description": "Maximum number of tasks to scrape",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "useProxy": {
+      "title": "Use Proxy",
+      "type": "boolean",
+      "description": "Use Apify residential proxy (recommended for reliability)",
+      "default": false,
+      "editor": "checkbox"
+    }
+  },
+  "required": []
+}

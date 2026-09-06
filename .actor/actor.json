@@ -1,0 +1,10 @@
+{
+  "actorSpecification": 1,
+  "name": "airtasker-scraper",
+  "title": "Airtasker Scraper",
+  "description": "Scrapes tasks from Airtasker.com - Australia's leading freelance and local services marketplace. Extract task titles, prices, locations, offers count, and more.",
+  "version": "1.0.0",
+  "input": "input_schema.json",
+  "dockerfile": "./Dockerfile",
+  "readme": "README.md"
+}
