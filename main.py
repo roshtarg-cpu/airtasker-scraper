@@ -5,92 +5,6 @@ from apify import Actor
 from playwright.async_api import async_playwright
 import re
 
-async def _parse_proxy(proxy_url):
-    """Parse proxy URL into Playwright proxy config"""
-    if not proxy_url:
-        return None
-    
-    # Expected format: http://user:pass@host:port
-    match = re.match(r'http://([^:]+):([^@]+)@([^:]+):(\d+)', proxy_url)
-    if match:
-        return {
-            'server': f'http://{match.group(3)}:{match.group(4)}',
-            'username': match.group(1),
-            'password': match.group(2)
-        }
-    return None
-
-async def _fetch(url, proxy_url=None):
-    """Fetch page content using Playwright"""
-    async with async_playwright() as p:
-        browser_args = {'headless': True}
-        
-        if proxy_url:
-            proxy = await _parse_proxy(proxy_url)
-            if proxy:
-                browser_args['proxy'] = proxy
-        
-        browser = await p.chromium.launch(**browser_args)
-        page = await browser.new_page()
-        
-        try:
-            await page.goto(url, wait_until='networkidle', timeout=60000)
-            await page.wait_for_timeout(3000)
-            content = await page.content()
-            return content
-        finally:
-            await page.close()
-            await browser.close()
-
-async def _extract_tasks(page, log):
-    """Extract task data from Airtasker page"""
-    tasks = []
-    
-    # Extract tasks using page.evaluate
-    task_data = await page.evaluate("""
-        () => {
-            const results = [];
-            
-            // Find all task links
-            const taskLinks = document.querySelectorAll('a[href*="/tasks/"]');
-            
-            for (const link of taskLinks) {
-                const href = link.getAttribute('href');
-                if (!href || href === '/tasks/' || href.includes('?')) continue;
-                
-                // Extract text content from the link and surrounding elements
-                const textContent = link.textContent || '';
-                const parts = textContent.split('\\n').map(s => s.trim()).filter(Boolean);
-                
-                if (parts.length === 0) continue;
-                
-                // Parse components
-                const title = parts[0];
-                const location = parts.find(p => p.includes('Remote') || p.includes(',')) || 'Not specified';
-                const priceMatch = textContent.match(/\$[\d,]+/);
-                const price = priceMatch ? priceMatch[0] : null;
-                
-                // Extract offers count
-                const offersMatch = textContent.match(/(\d+)\s+offer/);
-                const offers = offersMatch ? parseInt(offersMatch[1]) : 0;
-                
-                results.push({
-                    title: title,
-                    url: 'https://www.airtasker.com' + href,
-                    location: location,
-                    price: price,
-                    offers: offers,
-                    status: parts.includes('Open') ? 'Open' : 'Unknown'
-                });
-            }
-            
-            return results;
-        }
-    """)
-    
-    log.info(f'Extracted {len(task_data)} tasks from page')
-    return task_data
-
 async def main():
     async with Actor:
         log = Actor.log
@@ -98,75 +12,113 @@ async def main():
         
         # Get input
         actor_input = await Actor.get_input() or {}
-        category = actor_input.get('category', 'all')
         max_results = actor_input.get('maxResults', 50)
-        use_proxy = actor_input.get('useProxy', False)
+        search_keyword = actor_input.get('searchKeyword', '')
         
-        log.info(f'Config: category={category}, maxResults={max_results}, useProxy={use_proxy}')
-        
-        # Get proxy if enabled
-        proxy_url = None
-        if use_proxy:
-            import os
-            proxy_password = (
-                os.getenv('APIFY_PROXY_PASSWORD') or
-                Actor.get_env().get('proxy_password')  # No await
-            )
-            if proxy_password:
-                proxy_url = f"http://auto:{proxy_password}@proxy.apify.com:8000"
-                log.info('Using Apify proxy (RESIDENTIAL)')
+        log.info(f'Config: maxResults={max_results}, keyword={search_keyword}')
         
         # Build URL
-        if category and category != 'all':
-            url = f"https://www.airtasker.com/tasks/?category={category}"
+        if search_keyword:
+            url = f"https://www.airtasker.com/tasks/?q={search_keyword}"
         else:
             url = "https://www.airtasker.com/tasks/"
         
         log.info(f'Fetching: {url}')
         
-        # Use Playwright to fetch
+        # Use Playwright
         async with async_playwright() as p:
-            browser_args = {'headless': True}
-            
-            if proxy_url:
-                proxy = await _parse_proxy(proxy_url)
-                if proxy:
-                    browser_args['proxy'] = proxy
-            
-            browser = await p.chromium.launch(**browser_args)
+            browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
             
             try:
                 await page.goto(url, wait_until='networkidle', timeout=60000)
-                await page.wait_for_timeout(3000)
+                await page.wait_for_timeout(5000)  # Let page fully load
                 
-                # Extract tasks
-                tasks = await _extract_tasks(page, log)
+                log.info('Page loaded, extracting tasks...')
+                
+                # Extract tasks - simplified approach
+                tasks = await page.evaluate("""
+                    () => {
+                        const results = [];
+                        const taskLinks = document.querySelectorAll('a[href*="/tasks/"]');
+                        
+                        for (const link of taskLinks) {
+                            const href = link.getAttribute('href');
+                            
+                            // Skip invalid links
+                            if (!href || href === '/tasks/' || href.includes('?')) continue;
+                            if (href.split('/').length < 3) continue;
+                            
+                            // Get the full URL
+                            const fullUrl = href.startsWith('http') ? href : 'https://www.airtasker.com' + href;
+                            
+                            // Extract all text from the link
+                            const text = link.textContent || '';
+                            const lines = text.split('\\n').map(s => s.trim()).filter(s => s.length > 0);
+                            
+                            if (lines.length === 0) continue;
+                            
+                            // First substantial line is usually the title
+                            const title = lines[0];
+                            
+                            // Find price
+                            const priceMatch = text.match(/\\$([\\d,]+)/);
+                            const price = priceMatch ? '$' + priceMatch[1] : null;
+                            
+                            // Find offers
+                            const offersMatch = text.match(/(\\d+)\\s+offer/i);
+                            const offers = offersMatch ? parseInt(offersMatch[1]) : 0;
+                            
+                            // Location
+                            let location = 'Not specified';
+                            if (text.includes('Remote')) location = 'Remote';
+                            else {
+                                const locLine = lines.find(l => l.includes(',') || /^[A-Z][a-z]+/.test(l));
+                                if (locLine) location = locLine;
+                            }
+                            
+                            results.push({
+                                title: title,
+                                url: fullUrl,
+                                price: price,
+                                location: location,
+                                offers: offers,
+                                status: text.includes('Open') ? 'Open' : 'Unknown'
+                            });
+                        }
+                        
+                        return results;
+                    }
+                """)
+                
+                log.info(f'Extracted {len(tasks)} tasks from page')
+                
+                # Deduplicate by URL
+                seen_urls = set()
+                unique_tasks = []
+                for task in tasks:
+                    if task['url'] not in seen_urls:
+                        seen_urls.add(task['url'])
+                        unique_tasks.append(task)
+                
+                log.info(f'After dedup: {len(unique_tasks)} unique tasks')
                 
                 # Limit results
                 if max_results and max_results > 0:
-                    tasks = tasks[:max_results]
-                
-                log.info(f'Scraped {len(tasks)} tasks (limited to {max_results})')
+                    unique_tasks = unique_tasks[:max_results]
                 
                 # Push to dataset
-                if tasks:
-                    await Actor.push_data(tasks)
-                    log.info(f'Pushed {len(tasks)} items to dataset')
+                if unique_tasks:
+                    await Actor.push_data(unique_tasks)
+                    log.info(f'✅ Pushed {len(unique_tasks)} items to dataset')
                 else:
-                    log.warning('No tasks extracted!')
+                    log.warning('⚠️ No tasks extracted!')
                 
+            except Exception as e:
+                log.error(f'Error: {e}')
+                raise
             finally:
                 await page.close()
                 await browser.close()
-        
-        # Save task info
-        env = Actor.get_env()  # No await in SDK 4.x+
-        await Actor.set_value('SAVED-TASK', {
-            'actorId': env.get('actor_id'),
-            'actorRunId': env.get('actor_run_id'),
-            'defaultDatasetId': env.get('default_dataset_id'),
-            'itemCount': len(tasks) if tasks else 0
-        })
         
         log.info('Airtasker Scraper finished')
