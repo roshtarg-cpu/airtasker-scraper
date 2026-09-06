@@ -1,7 +1,7 @@
 """
 Airtasker Scraper - Scrapes tasks from airtasker.com
 """
-from apify import Actor, Request
+from apify import Actor
 from playwright.async_api import async_playwright
 import re
 
